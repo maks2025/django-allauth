@@ -1,6 +1,8 @@
 import logging
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from allauth.socialaccount.providers.oauth2.views import (
     OAuth2Adapter,
@@ -10,7 +12,22 @@ from allauth.socialaccount.providers.oauth2.views import (
 
 from .provider import AmazonProvider
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+def retry_session(retries, session=None, backoff_factor=0.3, status_forcelist=(500, 502, 503, 504)):
+    session = session or requests.Session()
+    retry = Retry(
+        total=retries,
+        read=retries,
+        connect=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('https://', adapter)
+    return session
+
 
 class AmazonOAuth2Adapter(OAuth2Adapter):
     provider_id = AmazonProvider.id
@@ -21,10 +38,12 @@ class AmazonOAuth2Adapter(OAuth2Adapter):
     redirect_uri_protocol = 'https'
 
     def complete_login(self, request, app, token, **kwargs):
-        response = requests.get(
+
+        session = retry_session(15)
+        response = session.get(
             self.profile_url,
             params={'access_token': token})
-        log.debug(
+        logger.debug(
             f'{self.__class__.__name__}. complete_login '
             f'user_id -> {request.user.id} '
             f'status code -> {response.status_code} '
